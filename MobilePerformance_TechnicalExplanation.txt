@@ -1,0 +1,35 @@
+--- HOW YOU APPROACHED THE OPTIMIZATION/ TOOLS USED ---
+- Unity Profiler: Used to analyse the CPU usage and identify frame rate drops.
+- Frame Debugger: Used to analyse the rendering pipeline and draw calls. 
+- Game View Stats: Used to monitor SetPass calls and frame times.
+
+To analyse the CPU Usage, I entered Play mode for a few seconds to let the scene run, and pause it. In the Profiler, I observed that the CPU was running at less than 15 FPS. By pressing 'A' to focus on a specific frame, I analysed the bottlenecks causing performance spikes.
+To analyze the GPU, I combined the Stats window with the Frame Debugger timeline.  
+
+--- IS THE SCENE IS CPU OR GPU BOUND? ---
+The project is CPU Bound.
+The profiling revealed that the main thread took ~153ms per frame, causing frame drops below 15FPS. In contrast, the GPU was only 4-5ms per frame, mostly waiting for the CPU to finish its logic.
+
+- CPU Problems: Multiple instances of 'UnoptimizedDistanceCube.Update()' were being invoked continuously, taking ~2.93ms per instance. Additionally, a lot of 'LogStringToConsole' (~0.06ms). This is due to an exponential loop running every frame for every cube spawned (50), calculating distances and spamming warning messages to the console. 
+- GPU Problems: The Stats window initially showed 27 SetPass calls due to having two active Main Cameras in the scene hierarchy, forcing Unity to render twice. Additionally, the timer text was concatenating strings and updating every frame inside a Canvas alongside static buttons, making the whole Canvas update every frame as well. 
+
+--- OPTIMIZATIONS MADE/WHY ARE THEY BETTER ---
+1. Removed the duplicated Main Camera (1) component: Having two active cameras forced Unity to render the scene twice. Removing it dropped SetPass calls from 27 to 15, the Frame Debugger showed the render pipeline executing only once, and the GPU Usage dropped from 4-5ms to an average of 3ms.
+
+2. Enabled GPU Instancing on the Cube material: It is better because it allows the GPU to draw multiple copies of the same mesh at once, using a small number of draw calls. 
+
+3. Refactored 'UnoptimizedDistanceCube.cs': Removed the Update() method and replaced it with a public method 'CalculateDistances(OptimizedDistanceCube[] allCubes)' called from the spawner. Since the cubes don't move, calculating distances every frame was unnecessary, now the calculations are done once at initialization. This dropped the CPU Usage time from 153ms to ~1ms, reaching the 60FPS. Console log spamming was also reduced to a single combined log per cube. 
+
+4. Refactored 'UnoptimizedDistanceCubeSpawner.cs': Stored all spawned cubes inside an array, and then passed the array as a parameter to the previously created  CalculateDistances method. 
+
+5. Canvas splitting: Divided the UI into two separate Canvas components: DynamicCanvas (text) and StaticCanvas (buttons). Modifying the text forces Unity to updated the whole Canvas, separating them prevents the static buttons from being updated every frame as well.
+
+6. Refactored 'UnoptimizedTimerText.cs': Updates the text using a time interval (every 0.1 seconds) instead of every frame. String in C# are immutable, so updating the text every frame creates constant garbage allocations.
+
+--- FINAL COMPARISON ---
+	        Unoptimized	Optimized
+Frame Rate	< 15 FPS	60 FPS
+CPU Usage	153 ms	        1 ms
+GPU usage	4 - 5 ms	3 ms
+SetPass calls	27	        15/16
+Console logs	999+ 	        50
